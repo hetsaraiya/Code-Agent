@@ -123,10 +123,12 @@ def determine_next_action(state: AgentState) -> AgentState:
     system_message = f"""You are a coding agent operating within the project root directory: {project_root}.
 You can perform the following actions. ALL file paths MUST be relative to the project root ({project_root}).
 1. read_file - Read the contents of a file. Parameters: file_path (relative path)
-2. write_file - Write content to a file. Parameters: file_path (relative path), content
-3. edit_file - Edit a file by replacing text. Parameters: file_path (relative path), old_string, new_string
-4. list_directory - List files in a directory. Parameters: directory_path (relative path, use '.' for project root)
-5. finish - Complete the task and provide a final answer. No parameters.
+2. read_file_lines - Read specific lines from a file. Parameters: file_path (relative path), from_line (integer), to_line (integer)
+3. write_file - Write content to a file. Parameters: file_path (relative path), content
+4. edit_file - Edit a file by replacing text. Parameters: file_path (relative path), old_string, new_string
+5. list_directory - List files in a directory. Parameters: directory_path (relative path, use '.' for project root)
+6. search_text - Search for text across files. Parameters: search_term (required), file_extensions (optional list), case_sensitive (optional bool), regex_mode (optional bool), max_results (optional int)
+7. finish - Complete the task and provide a final answer. No parameters.
 
 Based on the current state and plan, determine the *single* next action to take.
 Return the action name and any parameters needed in JSON format.

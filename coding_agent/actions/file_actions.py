@@ -7,7 +7,7 @@ from typing import Dict, List, Any
 import os # Import os for path joining if needed, though utils handle it now
 
 from coding_agent.core.types import AgentState
-from coding_agent.utils.file_operations import read_file, write_file, edit_file, list_directory
+from coding_agent.utils.file_operations import read_file, write_file, edit_file, list_directory, read_file_lines, search_text
 # Import the logger
 from coding_agent.utils.logging import logger
 
@@ -168,5 +168,149 @@ def list_directory_action(state: AgentState) -> AgentState:
 
 
     updated_state["action_output"] = output_message
+
+    return updated_state
+
+
+def read_file_lines_action(state: AgentState) -> AgentState:
+    """
+    Read specific lines from a file relative to the project root and update the state.
+
+    Args:
+        state: Current agent state, must contain 'project_root' and 'action_input' with 'file_path', 'from_line', and 'to_line'.
+
+    Returns:
+        Updated state with file lines content or error message.
+    """
+    action_input = state["action_input"]
+    project_root = state["project_root"]
+    file_path = action_input.get("file_path", "")  # Expecting relative path
+    from_line = action_input.get("from_line")
+    to_line = action_input.get("to_line")
+
+    if not file_path:
+        logger.error("read_file_lines_action called without file_path")
+        updated_state = state.copy()
+        updated_state["action_output"] = "Error: file_path parameter is missing for read_file_lines action."
+        return updated_state
+
+    if from_line is None or to_line is None:
+        logger.error("read_file_lines_action called without from_line or to_line")
+        updated_state = state.copy()
+        updated_state["action_output"] = "Error: from_line and to_line parameters are required for read_file_lines action."
+        return updated_state
+
+    try:
+        from_line = int(from_line)
+        to_line = int(to_line)
+    except (ValueError, TypeError):
+        logger.error("read_file_lines_action called with invalid line numbers")
+        updated_state = state.copy()
+        updated_state["action_output"] = "Error: from_line and to_line must be valid integers."
+        return updated_state
+
+    logger.info(f"Reading lines {from_line}-{to_line} from file: {file_path} relative to {project_root}")
+    result = read_file_lines(project_root, file_path, from_line, to_line)
+
+    # Update the state with the file content or error
+    updated_state = state.copy()
+    # Store content using a key that indicates the line range
+    content_key = f"{file_path}:{from_line}-{to_line}"
+    updated_state["files_content"][content_key] = result
+
+    if result.startswith("Error"):
+        logger.error(f"Failed to read lines {from_line}-{to_line} from file {file_path}: {result}")
+        updated_state["action_output"] = f"Read file lines {file_path}:{from_line}-{to_line}: Failed - {result}"
+    else:
+        logger.debug(f"Successfully read lines {from_line}-{to_line} from file {file_path}")
+        updated_state["action_output"] = f"Successfully read lines {from_line}-{to_line} from {file_path}."
+
+    return updated_state
+
+
+def search_text_action(state: AgentState) -> AgentState:
+    """
+    Search for text across files in the project and update the state.
+
+    Args:
+        state: Current agent state, must contain 'project_root' and 'action_input' with 'search_term'.
+               Optional parameters: 'file_extensions', 'case_sensitive', 'regex_mode', 'max_results'.
+
+    Returns:
+        Updated state with search results.
+    """
+    action_input = state["action_input"]
+    project_root = state["project_root"]
+    search_term = action_input.get("search_term", "")
+
+    if not search_term:
+        logger.error("search_text_action called without search_term")
+        updated_state = state.copy()
+        updated_state["action_output"] = "Error: search_term parameter is missing for search_text action."
+        return updated_state
+
+    # Optional parameters with defaults
+    file_extensions = action_input.get("file_extensions")  # None means search all supported extensions
+    case_sensitive = action_input.get("case_sensitive", False)
+    regex_mode = action_input.get("regex_mode", False)
+    max_results = action_input.get("max_results", 100)
+
+    logger.info(f"Searching for text: '{search_term}' in project root: {project_root}")
+    
+    # Perform the search
+    search_results = search_text(
+        project_root=project_root,
+        search_term=search_term,
+        file_extensions=file_extensions,
+        case_sensitive=case_sensitive,
+        regex_mode=regex_mode,
+        max_results=max_results
+    )
+
+    # Update the state
+    updated_state = state.copy()
+    
+    # Store search results in files_content with a special key
+    search_key = f"search_results:{search_term}"
+    updated_state["files_content"][search_key] = search_results
+
+    # Create human-readable output
+    if search_results.get('error'):
+        updated_state["action_output"] = f"Search for '{search_term}': Failed - {search_results['error']}"
+        logger.error(f"Search failed: {search_results['error']}")
+    else:
+        total_matches = search_results['total_matches']
+        files_searched = search_results['files_searched']
+        
+        # Create summary
+        summary_lines = [
+            f"Search for '{search_term}' completed:",
+            f"• {total_matches} matches found",
+            f"• {files_searched} files searched"
+        ]
+        
+        # Add results summary (first few matches)
+        if total_matches > 0:
+            summary_lines.append("\nMatches found in:")
+            file_matches = {}
+            for result in search_results['results']:
+                file_path = result['file_path']
+                if file_path not in file_matches:
+                    file_matches[file_path] = []
+                file_matches[file_path].append(result['line_number'])
+            
+            # Show first 10 files with matches
+            for i, (file_path, line_numbers) in enumerate(list(file_matches.items())[:10]):
+                if len(line_numbers) <= 3:
+                    lines_str = ", ".join(map(str, line_numbers))
+                else:
+                    lines_str = f"{', '.join(map(str, line_numbers[:3]))} and {len(line_numbers)-3} more"
+                summary_lines.append(f"  • {file_path} (lines: {lines_str})")
+            
+            if len(file_matches) > 10:
+                summary_lines.append(f"  • ... and {len(file_matches)-10} more files")
+        
+        updated_state["action_output"] = "\n".join(summary_lines)
+        logger.info(f"Search completed: {total_matches} matches in {len(file_matches) if 'file_matches' in locals() else 0} files")
 
     return updated_state
